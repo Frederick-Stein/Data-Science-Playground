@@ -1,1 +1,106 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
 
+
+## generate data
+def generate_data(
+    n=1000, seed=0, beta1=1.05, alpha1=0.4, alpha2=0.3,
+    binary_treatment=True, binary_cutoff=3.5, return_torch=False,
+    device="cpu", dtype=torch.float32
+):
+    torch.manual_seed(seed)
+
+    age = torch.normal(65.0, 5.0, (n,), device=device, dtype=dtype)
+    sodium = age / 18.0 + torch.randn(n, device=device, dtype=dtype)
+
+    if binary_treatment:
+        if binary_cutoff is None:
+            binary_cutoff = sodium.mean().item()   # python float
+        sodium = (sodium > binary_cutoff).to(dtype)  # 0/1 float
+
+    blood_pressure = beta1 * sodium + 2.0 * age + torch.randn(n, device=device, dtype=dtype)
+    proteinuria = alpha1 * sodium + alpha2 * blood_pressure + torch.randn(n, device=device, dtype=dtype)
+    hypertension = (blood_pressure >= 140).to(torch.int64)  # optional to return
+
+    if return_torch:
+        return {
+            "blood_pressure": blood_pressure,
+            "sodium": sodium,
+            "age": age,
+            "proteinuria": proteinuria,
+            "hypertension": hypertension,
+        }
+
+    to_np = lambda t: t.detach().cpu().numpy()
+    return pd.DataFrame({
+        "blood_pressure": to_np(blood_pressure),
+        "sodium": to_np(sodium),
+        "age": to_np(age),
+        "proteinuria": to_np(proteinuria),
+        "hypertension": to_np(hypertension),
+    })
+
+
+## prepare data
+data = generate_data(n=1000, seed=42, beta1=1.05, alpha1=0.4, alpha2=0.3, binary_treatment=True, binary_cutoff=3.5, return_torch=True)
+age = data['age'].float()
+sodium= data['sodium'].float()
+pro = data['proteinuria'].float()
+X = torch.stack([sodium, age, pro], dim = 1).float()
+# X = torch.stack([sodium, age], dim = 1).float()
+y = data['blood_pressure'].float().unsqueeze(1)
+
+train_data = TensorDataset(X, y)
+train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
+
+
+## construct model
+class LinearRegression(nn.Module):
+    def __init__(self, input_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, out_dim)
+
+    def forward(self, x):
+        return self.linear(x)
+
+
+## train model
+model = LinearRegression(3, 1)
+loss_fn = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay = 1e-4)
+
+epochs = 50
+
+for epoch in range(1, epochs + 1):
+
+    model.train()
+
+    for X_batch, y_batch in train_loader:
+        y_pred = model(X_batch)
+        loss = loss_fn(y_pred, y_batch)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    # y_pred = model(X)
+    # loss = loss_fn(y_pred, y)
+
+    # optimizer.zero_grad()
+    # loss.backward()
+    # optimizer.step()
+
+
+
+## evaluate result
+with torch.inference_mode():
+    X1 = X.clone()
+    X1[:, 0] = 1.0
+    X0 = X.clone()
+    X0[:, 0] = 0.0
+    ATE_est = (model(X1) - model(X0)).mean().item()
+    print(f"Estimated ATE: {ATE_est:.4f}")
