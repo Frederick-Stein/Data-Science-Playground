@@ -9,42 +9,46 @@ from torch.utils.data import TensorDataset, DataLoader
 
 
 
-## mini sentence
-token_to_id = {
-    "what": 0,
-    "is": 1,
-    "the": 2,
-    "weather": 3,
-    "today": 4,
-    "sunny": 5,
-    'rainy': 6,
-    'tomorrow': 7,
-    "<EOS>": 8,
-    }
+## generalized sentence encode
+sentence1 = "what is the weather today sunny"
+sentence2 = "please tell me the weather tomorrow rainy"
+sentences = [sentence1, sentence2]
 
-id_to_token = {v: k for k, v in token_to_id.items()}
+words = set()
+for sentence in sentences:
+    for word in sentence.split():
+        words.add(word)
 
-# input_sentence = "what is the weather today <EOS> sunny"
-# output_sentence = "is the weather today <EOS> sunny <EOS>"
+token_to_id = {"<PAD>": 0, "<EOS>": 1}
+id_to_token = {0: "<PAD>", 1: "<EOS>"}
+for i, word in enumerate(words, start = 2):
+    token_to_id[word] = i
+    id_to_token[i] = word
+print(token_to_id)
+print(id_to_token)
 
-# input_tokens = input_sentence.split()
-# output_tokens = output_sentence.split()
+def encode(sentence):
+    ids = []
+    for word in sentence.split():
+        ids.append(token_to_id[word])
+    return ids
 
-# input_ids = torch.tensor([token_to_id[token] for token in input_tokens])
-# output_ids = torch.tensor([token_to_id[token] for token in output_tokens])
+encoded_sentences = []
+for sentence in sentences:
+    encoded = encode(sentence)
+    encoded.append(token_to_id["<EOS>"])
+    encoded_sentences.append(torch.tensor(encoded))
 
-
-input_ids = torch.tensor([[token_to_id["what"], token_to_id["is"], token_to_id["the"], token_to_id["weather"], token_to_id["today"], token_to_id["<EOS>"], token_to_id["sunny"]],
-                       [token_to_id["the"], token_to_id['weather'], token_to_id['tomorrow'], token_to_id['is'], token_to_id['what'], token_to_id['<EOS>'], token_to_id['rainy']]
-                       ])
-
-output_ids = torch.tensor([
-    [token_to_id['is'], token_to_id['the'], token_to_id["weather"], token_to_id["today"], token_to_id["<EOS>"], token_to_id["sunny"], token_to_id['<EOS>']],
-    [token_to_id['weather'], token_to_id['tomorrow'], token_to_id['is'], token_to_id['what'], token_to_id['<EOS>'], token_to_id['rainy'], token_to_id['<EOS>']],
-])
+input_ids = nn.utils.rnn.pad_sequence(encoded_sentences, batch_first=True, padding_value=0)
+output_ids = input_ids.clone()
+output_ids[:, :-1] = input_ids[:, 1:]
+output_ids[:, -1] = 0
+print(input_ids)
+print(output_ids)
 
 train_data = TensorDataset(input_ids, output_ids)
 train_loader = DataLoader(train_data, batch_size=2, shuffle=True)
+
 
 
 ## construct transformer
@@ -147,7 +151,8 @@ class MiniTransformer(nn.Module):
 
 ## test model
 model = MiniTransformer(num_tokens = len(token_to_id), d_model = 4, vocab_size  = 8)
-input = torch.tensor([token_to_id["what"], token_to_id["is"], token_to_id["the"], token_to_id["weather"], token_to_id["today"], token_to_id["<EOS>"]])
+test = "what is the weather today <EOS>"
+input = torch.tensor(encode(test))
 
 input_length = input.size(0)
 predictions = model(input.unsqueeze(0)).squeeze(0)
@@ -201,9 +206,14 @@ for epoch in range(epochs):
 ## evaluate result
 model.eval()
 
-# input = torch.tensor([token_to_id["what"], token_to_id["is"], token_to_id["the"], token_to_id["weather"], token_to_id["today"], token_to_id["<EOS>"]])
-# input = torch.tensor([token_to_id["the"], token_to_id["weather"], token_to_id["is"], token_to_id["what"], token_to_id["tomorrow"], token_to_id["<EOS>"]])
-# input = torch.tensor([token_to_id["what"], token_to_id["is"], token_to_id["the"], token_to_id["weather"], token_to_id["tomorrow"], token_to_id["<EOS>"]])
+test1 = "what is the weather today"
+test2 = "please tell me the weather tomorrow"
+test3 = "what is the weather tomorrow"
+test4 = "weather today is"
+
+test = torch.tensor(encode(test4))
+input_length = len(test)
+
 predictions = model(input.unsqueeze(0)).squeeze(0)
 predicted_id = torch.tensor([torch.argmax(predictions[-1, :]).detach()])
 predicted_ids = predicted_id
