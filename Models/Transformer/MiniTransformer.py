@@ -96,18 +96,18 @@ class Attention(nn.Module):
         V = self.W_v(encodings_for_v) # (B, Lv, d)
 
         ## softmax(Q * K^T / sqrt(d_k) + M) * V
-        similarity = Q @ K.transpose(-1, -2) # Q * K^T
+        scores = Q @ K.transpose(-1, -2) # Q * K^T
 
         # d_k
         d_k = K.size(-1)
 
         # scaled_simalrity = simalrity / torch.sqrt(torch.tensor(K.shape(-1))) # Q * K^T / sqrt(d_k)
-        scaled_similarity = similarity / math.sqrt(d_k)# Q * K^T / sqrt(d_k)
+        scaled_scores = scores / math.sqrt(d_k)# Q * K^T / sqrt(d_k)
 
         if mask is not None:
-            scaled_similarity = scaled_similarity.masked_fill(mask, float("-inf")) # Q * K^T / sqrt(d_k) + M
+            scaled_scores = scaled_scores.masked_fill(mask, float("-inf")) # Q * K^T / sqrt(d_k) + M
 
-        attention_weights = F.softmax(scaled_similarity, dim = -1) # softmax(Q * K^T / sqrt(d_k) + M)
+        attention_weights = F.softmax(scaled_scores, dim = -1) # softmax(Q * K^T / sqrt(d_k) + M)
 
         attention_scores = attention_weights @ V # softmax(Q * K^T / sqrt(d_k) + M) * V
 
