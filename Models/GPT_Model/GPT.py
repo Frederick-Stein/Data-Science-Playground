@@ -7,33 +7,71 @@ from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 import math
 
-### encode data
-def Encode(sentences: list):
+#----------------------------------------------------------------------------------------------------------------------------------------------------------
+### prepare context
+SPECIALS = ["<PAD>", "<UNK>", "<BOS>", "<EOS>"]
+def build_vocab(sentences, min_freq=1, lowercase=True, max_vocab=None):
+    if lowercase:
+        sentences = [s.lower() for s in sentences]
+    counter = Counter()
+    for s in sentences:
+        counter.update(s.split())
+    # Stable, frequency-sorted vocab (ties broken lexicographically)
+    words = sorted([w for w, c in counter.items() if c >= min_freq])
+    if max_vocab is not None:
+        words = words[: max(0, max_vocab - len(SPECIALS))]
 
-    words = set()
-    for sentence in sentences:
-        for word in sentence.split():
-            words.add(word)
+    token_to_id = {tok: i for i, tok in enumerate(SPECIALS)}
+    start = len(SPECIALS)
+    for i, w in enumerate(words, start=start):
+        token_to_id[w] = i
+    id_to_token = {i: t for t, i in token_to_id.items()}
+    return token_to_id, id_to_token
 
-    token_to_id = {"<PAD>": 0, "<EOS>": 1}
-    id_to_token = {0: "<PAD>", 1: "<EOS>"}
-    for i, word in enumerate(words, start = 2):
-        token_to_id[word] = i
-        id_to_token[i] = word
+def encode_sentence(sentence, token_to_id, add_bos=True, add_eos=True, lowercase=True):
+    if lowercase:
+        sentence = sentence.lower()
+    ids = []
+    if add_bos:
+        ids.append(token_to_id["<BOS>"])
+    for w in sentence.split():
+        ids.append(token_to_id.get(w, token_to_id["<UNK>"]))
+    if add_eos:
+        ids.append(token_to_id["<EOS>"])
+    return torch.tensor(ids, dtype=torch.long)
 
+def pad_batch(encoded, pad_id=0, max_len=None, batch_first=True):
+    if max_len is not None:
+        # truncate or pad to max_len
+        clipped = []
+        for t in encoded:
+            if t.numel() > max_len:
+                clipped.append(t[:max_len])
+            else:
+                clipped.append(t)
+        encoded = clipped
+    padded = nn.utils.rnn.pad_sequence(encoded, batch_first=batch_first, padding_value=pad_id)
+    # attention mask: 1 for tokens, 0 for pad
+    mask = (padded != pad_id).to(torch.bool)
+    lengths = mask.sum(dim=1 if batch_first else 0) # length of real tokens in each sentence
+    return padded, mask, lengths
+
+def Encode(sentences, *, min_freq=1, lowercase=True, max_vocab=None, add_bos=True, add_eos=True, max_len=None, batch_first=True):
+
+    token_to_id, id_to_token = build_vocab(
+        sentences, min_freq=min_freq, lowercase=lowercase, max_vocab=max_vocab
+    )
+    encoded = [
+        encode_sentence(s, token_to_id, add_bos=add_bos, add_eos=add_eos, lowercase=lowercase) for s in sentences
+    ]
+    padded_ids, attn_mask, lengths = pad_batch(
+        encoded, pad_id=token_to_id["<PAD>"], max_len=max_len, batch_first=batch_first
+    )
     vocab_size = len(token_to_id)
-
-    def encode(sentence):
-        ids = []
-        for word in sentence.split():
-            ids.append(token_to_id[word])
-        return ids
-
-    encoded_sentences = [torch.tensor(encode(sentence)) for sentence in sentences]
-    padded_sentences =  nn.utils.rnn.pad_sequence(encoded_sentences, batch_first=True, padding_value=0)
-    return vocab_size, padded_sentences, token_to_id, id_to_token
+    return vocab_size, padded_ids, attn_mask, lengths, token_to_id, id_to_token
 
 
+#----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ### Embedding function
 class Embedding(nn.Module):
@@ -42,8 +80,8 @@ class Embedding(nn.Module):
 
         super().__init__()
         self.embedding_dim = embedding_dim
-        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
-        self.position_embeddings = nn.Embedding(max_context_length, embedding_dim, padding_idx = pad_idx)
+        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx = pad_idx)
+        self.position_embeddings = nn.Embedding(max_context_length, embedding_dim)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         # Cache [0, 1, 2, ..., max_context_len-1] as a buffer
@@ -58,6 +96,10 @@ class Embedding(nn.Module):
         # context (B, L) B : batch size, L: context length
         assert context.dtype == torch.long
         B, L = context.shape
+        # check if input context longer than max_context_length
+        if L > self.max_context_length:
+            raise ValueError(f"Sequence length {L} exceeds max_context_length {self.max_context_length}")
+
         word_embeddings = self.word_embeddings(context) * math.sqrt(self.embedding_dim)# (B, L, embedding_dim)
         positions = self.position_ids[:, :L] # (1, L)
         position_embeddings = self.position_embeddings(positions) # (1，L, embedding_dim)
@@ -186,6 +228,8 @@ class GPT(nn.Module):
         ])
         self.final_norm = nn.LayerNorm(embedding_dim)
         self.vocab_projection = nn.Linear(embedding_dim, vocab_size, bias=False)
+        # tie projection weight with embedding
+        self.vocab_projection.weight = self.embedding.word_embeddings.weight
         
     def forward(self, context: torch.Tensor, attn_mask: torch.Tensor | None = None):
         # context: (B, L)
