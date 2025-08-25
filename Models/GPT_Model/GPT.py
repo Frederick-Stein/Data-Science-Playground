@@ -80,6 +80,7 @@ class Embedding(nn.Module):
 
         super().__init__()
         self.embedding_dim = embedding_dim
+        self.max_context_length = max_context_length
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx = pad_idx)
         self.position_embeddings = nn.Embedding(max_context_length, embedding_dim)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
