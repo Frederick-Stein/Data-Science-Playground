@@ -75,3 +75,26 @@ plt.xlabel('Predicted Labels')
 plt.ylabel('True Labels')
 plt.title('Confusion Matrix')
 plt.show()
+
+
+## GridSearch
+param_grid = {'kernel':['rbf'],'C':[0.1,1,10,100], 'gamma':[1,0.1, 0.01,0.001,0.0001]}
+grid_model = GridSearchCV(SVC(), param_grid, refit=True, verbose=3)
+grid_model.fit(X_train, y_train)
+
+grid_model.best_params_
+
+grid_model.best_estimator_
+
+## best model in GridSearchCV
+y_pred = grid_model.predict(X_test)
+
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy: {accuracy: .4f}")
+print(classification_report(y_test, y_pred))
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.xlabel('Predicted Labels')
+plt.ylabel('True Labels')
+plt.title('Confusion Matrix')
+plt.show()
