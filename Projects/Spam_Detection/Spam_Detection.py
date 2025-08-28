@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import classification_report,accuracy_score
+from sklearn.metrics import classification_report,accuracy_score,confusion_matrix
 from sklearn.model_selection import train_test_split
 
 import tensorflow as tf
@@ -158,3 +158,9 @@ plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
 
+cm = confusion_matrix(y_test, lstm_model.predict(X_test).round())
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.xlabel('Predicted Labels')
+plt.ylabel('True Labels')
+plt.title('Confusion Matrix')
+plt.show()
